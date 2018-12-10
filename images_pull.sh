@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -o errexit
+set -o pipefail
+set -o nounset
+trap 'echo "$0: line $LINENO: exit status of last command: $?" >&2' ERR
+trap 'cleanup' EXIT
+
+usage() {
+  echo "
+Usage:	$0 [OPTIONS] [USER@]HOST NAME[:TAG] [NAME[:TAG]...]
+
+Push images directly to a remote host (without a separate registry)
+
+Options:
+  -s, --ssh_opts string   Specify additional ssh arguments (e.g. --ssh_opts \"-i private.pem -C\")"
+}
+
+cleanup() {
+  if [ -n "${registry_container_name-}" ] && docker ps -q -f name="$registry_container_name"
+  then
+    echo "Killing the registry..."
+    docker kill "$registry_container_name" || true
+    docker rm "$registry_container_name" || true
+  fi
+}
+
+flag-error() {
+  local message="$1"
+  echo "$message" >&2
+  usage >&2
+  exit 125
+}
+
+argument-error() {
+  local message="$1"
+  echo "$message" >&2
+  usage >&2
+  exit 1
+}
+
+wait-for() {
+  local max_wait_seconds=5
+  local start_time="$SECONDS"
+  local exit_code
+
+  while true
+  do
+    # Run the command being retried and capture the error code. This
+    # awkward incantation ensures correct behavior even if the errexit
+    # option is set.
+    "$@" && exit_code="$?" || exit_code="$?"
+
+    if [ "$exit_code" -eq 0 ] || [ $(($SECONDS - $start_time)) -ge "$max_wait_seconds" ]
+    then
+      break
+    else
+      sleep 0.1
+    fi
+  done
+
+  return "$exit_code"
+}
+
+check-registry() {
+  local registry="$1"
+  # Check if the registry is up.
+  docker login --username="AzureDiamond" --password="hunter2" "$registry" >/dev/null 2>&1
+}
+
+args=""
+while [ -n "${1+x}" ]
+do
+  case "$1" in
+    -s|--ssh_opts|--ssh_opts=*)
+      ssh_opts="${1##--ssh_opts=}"
+      if [ "$ssh_opts" = "$1" ]
+      then
+        if [ "$#" -ge 2 ]
+        then
+          ssh_opts="$2"
+          shift
+        else
+          ssh_opts=""
+        fi
+      fi
+      if [ -z "$ssh_opts" ]
+      then
+        flag-error "flag needs an argument: $1"
+      fi
+      ;;
+    -*)
+      flag-error "unknown flag: $1"
+      ;;
+    *)
+      args="$args $1"
+      ;;
+  esac
+  shift
+done
+
+eval set -- "$args"
+
+if [ "$#" -lt 2 ]
+then
+  argument-error "\"$0\" requires at least 2 arguments."
+fi
+
+deploy_target="$1"
+shift
+image_names="$*"
+
+registry_port=5000
+registry_host="localhost"
+
+echo "Running a registry at $registry_host:$registry_port..."
+registry_container_name=$(
+  docker run --detach --publish="$registry_port:$registry_port" registry:2
+)
+
+wait-for check-registry "$registry_host:$registry_port"
+echo "The registry at $registry_host:$registry_port is now usable."
+
+for source_image_name in $image_names
+do
+  echo "Pushing $source_image_name to $registry_host:$registry_port..."
+  docker tag "$source_image_name" "$registry_host:$registry_port/$source_image_name"
+  docker push "$registry_host:$registry_port/$source_image_name"
+  docker rmi "$registry_host:$registry_port/$source_image_name"
+done
+
+ssh -R "$registry_port:$registry_host:$registry_port" ${ssh_opts:-} "$deploy_target" sh <<EOF
+  for target_image_name in $image_names
+  do
+    echo "Pulling \$target_image_name onto $deploy_target from $registry_host:$registry_port..."
+    docker pull "$registry_host:$registry_port/\$target_image_name" \
+      && docker tag "$registry_host:$registry_port/\$target_image_name" "\$target_image_name" \
+      && docker rmi "$registry_host:$registry_port/\$target_image_name"
+  done
+EOF
