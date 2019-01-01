@@ -23,5 +23,5 @@ d = Dog()
 #print d
 #a = Animal()
 #print a.eat()
-print d.bark()
-print d.eat()
+d.bark()
+d.eat()

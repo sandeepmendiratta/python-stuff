@@ -15,12 +15,17 @@ def readStudentDetais():
 
 
 def rankStudents(studentRecord):
-    sortedStudentRecord = sorted(studentRecord.items(), key = operator.itemgetter(1), reverse=True)
-    print(sortedStudentRecord)
-    print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[0][0], sortedStudentRecord[0][1]))
-    print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[1][0], sortedStudentRecord[1][1]))
-    print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[2][0], sortedStudentRecord[2][1]))
-    return sortedStudentRecord
+    try:
+        print()
+        sortedStudentRecord = sorted(studentRecord.items(), key = operator.itemgetter(1), reverse=True)
+        print(sortedStudentRecord)
+        print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[0][0], sortedStudentRecord[0][1]))
+        print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[1][0], sortedStudentRecord[1][1]))
+        print("{} has scrored rank 1 with {} marks".format(sortedStudentRecord[2][0], sortedStudentRecord[2][1]))
+        return sortedStudentRecord
+    except IndexError:
+        print("Enter a minimum of 3 Students")
+        quit()    
 
 def rewardStudents(sortedStudentRecord, reward):
     print("{} has received cash reward of ${}".format(sortedStudentRecord[0][0], reward[0]))
